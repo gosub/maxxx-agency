@@ -1,0 +1,9 @@
+telegram_token_env = "TELEGRAM_TOKEN"
+openrouter_key_env = "OPENROUTER_KEY"
+allowed_user_id_env = "ALLOWED_USER_ID"
+daily_checkin_hour = 9
+timezone = "Europe/Rome"
+model = "google/gemma-3-1b-it:free"
+language = "it"
+tone = "warm"
+bot_name = "Maxxx Agency"
