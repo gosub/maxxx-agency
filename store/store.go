@@ -66,14 +66,18 @@ func (s *Store) GetState(userID int64) (*State, error) {
 		FROM state WHERE user_id = ?`, userID)
 
 	st := &State{}
+	var lastCheckin sql.NullString
 	err := row.Scan(&st.UserID, &st.CurrentPhase, &st.CurrentGoals,
-		&st.RejectionLog, &st.LastCheckin, &st.ConversationHistory,
+		&st.RejectionLog, &lastCheckin, &st.ConversationHistory,
 		&st.ConfigNotes, &st.Language, &st.Tone)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan state: %w", err)
+	}
+	if lastCheckin.Valid {
+		st.LastCheckin = lastCheckin.String
 	}
 	return st, nil
 }
@@ -213,6 +217,9 @@ func (s *Store) CompleteGoal(userID int64, index int) error {
 }
 
 func (s *Store) SetConversationHistory(userID int64, messages []map[string]string) error {
+	if _, err := s.EnsureState(userID, "it", "warm"); err != nil {
+		return err
+	}
 	data, err := json.Marshal(messages)
 	if err != nil {
 		return err
@@ -234,6 +241,9 @@ func (s *Store) GetConversationHistory(userID int64) ([]map[string]string, error
 }
 
 func (s *Store) MarkCheckin(userID int64) error {
+	if _, err := s.EnsureState(userID, "it", "warm"); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`UPDATE state SET last_checkin = ? WHERE user_id = ?`,
 		time.Now().Format("2006-01-02"), userID)
 	return err
