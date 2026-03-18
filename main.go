@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -81,7 +82,7 @@ func main() {
 	defer s.Close()
 
 	// Ensure initial state
-	_, err = s.EnsureState(allowedUserID, cfg.Language, cfg.Tone)
+	_, err = s.EnsureState(context.Background(), allowedUserID, cfg.Language, cfg.Tone)
 	if err != nil {
 		log.Fatalf("Failed to ensure state: %v", err)
 	}
@@ -105,14 +106,16 @@ func main() {
 		cfg.BotName, allowedUserID, cfg.Language, cfg.Tone)
 	fmt.Printf("Daily check-in at %d:00 %s\n", cfg.DailyCheckinHour, cfg.Timezone)
 
-	stop := make(chan struct{})
-	go b.Run(stop)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go b.Run(ctx)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	fmt.Println("\nShutting down...")
-	close(stop)
+	cancel()
 	fmt.Println("Goodbye!")
 }

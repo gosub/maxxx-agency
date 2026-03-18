@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -24,8 +25,9 @@ func TestNew(t *testing.T) {
 
 func TestEnsureState_CreatesNew(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	st, err := s.EnsureState(1, "en", "direct")
+	st, err := s.EnsureState(ctx, 1, "en", "direct")
 	if err != nil {
 		t.Fatalf("EnsureState: %v", err)
 	}
@@ -48,14 +50,14 @@ func TestEnsureState_CreatesNew(t *testing.T) {
 
 func TestEnsureState_ReturnsExisting(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	_, _ = s.EnsureState(1, "en", "direct")
+	_, _ = s.EnsureState(ctx, 1, "en", "direct")
 
-	st, err := s.EnsureState(1, "it", "warm")
+	st, err := s.EnsureState(ctx, 1, "it", "warm")
 	if err != nil {
 		t.Fatalf("EnsureState: %v", err)
 	}
-	// Should keep original values, not the new defaults
 	if st.Language != "en" {
 		t.Errorf("Language = %q, want %q (should not overwrite)", st.Language, "en")
 	}
@@ -66,8 +68,9 @@ func TestEnsureState_ReturnsExisting(t *testing.T) {
 
 func TestGetState_NonExistent(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	st, err := s.GetState(999)
+	st, err := s.GetState(ctx, 999)
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -78,13 +81,15 @@ func TestGetState_NonExistent(t *testing.T) {
 
 func TestSetLanguage(t *testing.T) {
 	s := newTestStore(t)
-	_, _ = s.EnsureState(1, "en", "direct")
+	ctx := context.Background()
 
-	if err := s.SetLanguage(1, "it"); err != nil {
+	_, _ = s.EnsureState(ctx, 1, "en", "direct")
+
+	if err := s.SetLanguage(ctx, 1, "it"); err != nil {
 		t.Fatalf("SetLanguage: %v", err)
 	}
 
-	st, _ := s.GetState(1)
+	st, _ := s.GetState(ctx, 1)
 	if st.Language != "it" {
 		t.Errorf("Language = %q, want %q", st.Language, "it")
 	}
@@ -92,13 +97,15 @@ func TestSetLanguage(t *testing.T) {
 
 func TestSetTone(t *testing.T) {
 	s := newTestStore(t)
-	_, _ = s.EnsureState(1, "en", "warm")
+	ctx := context.Background()
 
-	if err := s.SetTone(1, "drill-sergeant"); err != nil {
+	_, _ = s.EnsureState(ctx, 1, "en", "warm")
+
+	if err := s.SetTone(ctx, 1, "drill-sergeant"); err != nil {
 		t.Fatalf("SetTone: %v", err)
 	}
 
-	st, _ := s.GetState(1)
+	st, _ := s.GetState(ctx, 1)
 	if st.Tone != "drill-sergeant" {
 		t.Errorf("Tone = %q, want %q", st.Tone, "drill-sergeant")
 	}
@@ -106,8 +113,9 @@ func TestSetTone(t *testing.T) {
 
 func TestAddRejection(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	count, err := s.AddRejection(1)
+	count, err := s.AddRejection(ctx, 1)
 	if err != nil {
 		t.Fatalf("AddRejection: %v", err)
 	}
@@ -115,7 +123,7 @@ func TestAddRejection(t *testing.T) {
 		t.Errorf("count = %d, want 1", count)
 	}
 
-	count, err = s.AddRejection(1)
+	count, err = s.AddRejection(ctx, 1)
 	if err != nil {
 		t.Fatalf("AddRejection: %v", err)
 	}
@@ -123,7 +131,7 @@ func TestAddRejection(t *testing.T) {
 		t.Errorf("count = %d, want 2", count)
 	}
 
-	st, _ := s.GetState(1)
+	st, _ := s.GetState(ctx, 1)
 	var rejections []string
 	if err := json.Unmarshal([]byte(st.RejectionLog), &rejections); err != nil {
 		t.Fatalf("unmarshal rejection log: %v", err)
@@ -135,15 +143,16 @@ func TestAddRejection(t *testing.T) {
 
 func TestAddGoal(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	if err := s.AddGoal(1, "Read Dune"); err != nil {
+	if err := s.AddGoal(ctx, 1, "Read Dune"); err != nil {
 		t.Fatalf("AddGoal: %v", err)
 	}
-	if err := s.AddGoal(1, "Start rejection log"); err != nil {
+	if err := s.AddGoal(ctx, 1, "Start rejection log"); err != nil {
 		t.Fatalf("AddGoal: %v", err)
 	}
 
-	goals, err := s.GetGoals(1)
+	goals, err := s.GetGoals(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetGoals: %v", err)
 	}
@@ -160,17 +169,17 @@ func TestAddGoal(t *testing.T) {
 
 func TestCompleteGoal(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	_ = s.AddGoal(1, "Read Dune")
-	_ = s.AddGoal(1, "Start log")
-	_ = s.AddGoal(1, "Exercise daily")
+	_ = s.AddGoal(ctx, 1, "Read Dune")
+	_ = s.AddGoal(ctx, 1, "Start log")
+	_ = s.AddGoal(ctx, 1, "Exercise daily")
 
-	// Complete middle goal (index 1)
-	if err := s.CompleteGoal(1, 1); err != nil {
+	if err := s.CompleteGoal(ctx, 1, 1); err != nil {
 		t.Fatalf("CompleteGoal: %v", err)
 	}
 
-	goals, _ := s.GetGoals(1)
+	goals, _ := s.GetGoals(ctx, 1)
 	if len(goals) != 2 {
 		t.Fatalf("len(goals) = %d, want 2", len(goals))
 	}
@@ -184,28 +193,31 @@ func TestCompleteGoal(t *testing.T) {
 
 func TestCompleteGoal_InvalidIndex(t *testing.T) {
 	s := newTestStore(t)
-	_ = s.AddGoal(1, "Only goal")
+	ctx := context.Background()
 
-	if err := s.CompleteGoal(1, 5); err == nil {
+	_ = s.AddGoal(ctx, 1, "Only goal")
+
+	if err := s.CompleteGoal(ctx, 1, 5); err == nil {
 		t.Error("expected error for out-of-range index, got nil")
 	}
-	if err := s.CompleteGoal(1, -1); err == nil {
+	if err := s.CompleteGoal(ctx, 1, -1); err == nil {
 		t.Error("expected error for negative index, got nil")
 	}
 }
 
 func TestConversationHistory(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
 	msgs := []map[string]string{
 		{"role": "user", "content": "Hello"},
 		{"role": "assistant", "content": "Hi there"},
 	}
-	if err := s.SetConversationHistory(1, msgs); err != nil {
+	if err := s.SetConversationHistory(ctx, 1, msgs); err != nil {
 		t.Fatalf("SetConversationHistory: %v", err)
 	}
 
-	got, err := s.GetConversationHistory(1)
+	got, err := s.GetConversationHistory(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetConversationHistory: %v", err)
 	}
@@ -219,8 +231,9 @@ func TestConversationHistory(t *testing.T) {
 
 func TestConversationHistory_Empty(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	got, err := s.GetConversationHistory(1)
+	got, err := s.GetConversationHistory(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetConversationHistory: %v", err)
 	}
@@ -231,9 +244,9 @@ func TestConversationHistory_Empty(t *testing.T) {
 
 func TestCheckin(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	// No checkin yet
-	date, err := s.GetLastCheckin(1)
+	date, err := s.GetLastCheckin(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetLastCheckin: %v", err)
 	}
@@ -241,12 +254,11 @@ func TestCheckin(t *testing.T) {
 		t.Errorf("date = %q, want empty", date)
 	}
 
-	// Mark checkin
-	if err := s.MarkCheckin(1); err != nil {
+	if err := s.MarkCheckin(ctx, 1); err != nil {
 		t.Fatalf("MarkCheckin: %v", err)
 	}
 
-	date, err = s.GetLastCheckin(1)
+	date, err = s.GetLastCheckin(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetLastCheckin: %v", err)
 	}
@@ -260,12 +272,13 @@ func TestCheckin(t *testing.T) {
 
 func TestMultipleUsers(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	_ = s.AddGoal(1, "User 1 goal")
-	_ = s.AddGoal(2, "User 2 goal")
+	_ = s.AddGoal(ctx, 1, "User 1 goal")
+	_ = s.AddGoal(ctx, 2, "User 2 goal")
 
-	goals1, _ := s.GetGoals(1)
-	goals2, _ := s.GetGoals(2)
+	goals1, _ := s.GetGoals(ctx, 1)
+	goals2, _ := s.GetGoals(ctx, 2)
 
 	if len(goals1) != 1 || goals1[0] != "User 1 goal" {
 		t.Errorf("user 1 goals = %v, want [User 1 goal]", goals1)
@@ -277,20 +290,32 @@ func TestMultipleUsers(t *testing.T) {
 
 func TestUpdateState(t *testing.T) {
 	s := newTestStore(t)
+	ctx := context.Background()
 
-	st, _ := s.EnsureState(1, "en", "warm")
+	st, _ := s.EnsureState(ctx, 1, "en", "warm")
 	st.CurrentPhase = 2
 	st.ConfigNotes = "some notes"
 
-	if err := s.UpdateState(st); err != nil {
+	if err := s.UpdateState(ctx, st); err != nil {
 		t.Fatalf("UpdateState: %v", err)
 	}
 
-	got, _ := s.GetState(1)
+	got, _ := s.GetState(ctx, 1)
 	if got.CurrentPhase != 2 {
 		t.Errorf("CurrentPhase = %d, want 2", got.CurrentPhase)
 	}
 	if got.ConfigNotes != "some notes" {
 		t.Errorf("ConfigNotes = %q, want %q", got.ConfigNotes, "some notes")
+	}
+}
+
+func TestContextCancellation(t *testing.T) {
+	s := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := s.EnsureState(ctx, 1, "en", "warm")
+	if err == nil {
+		t.Error("expected error with cancelled context, got nil")
 	}
 }

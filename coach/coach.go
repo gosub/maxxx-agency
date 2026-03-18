@@ -2,6 +2,7 @@ package coach
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,7 +51,7 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *Coach) Chat(systemPrompt string, history []map[string]string, userMessage string) (string, error) {
+func (c *Coach) Chat(ctx context.Context, systemPrompt string, history []map[string]string, userMessage string) (string, error) {
 	messages := []chatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
@@ -84,12 +85,19 @@ func (c *Coach) Chat(systemPrompt string, history []map[string]string, userMessa
 	var lastErr error
 	for attempt := 0; attempt < apiMaxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * apiRetryBackoffBase * time.Second)
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * apiRetryBackoffBase * time.Second):
+			}
 		}
 
-		resp, err := c.doRequest(body)
+		resp, err := c.doRequest(ctx, body)
 		if err != nil {
 			lastErr = err
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
 			continue
 		}
 
@@ -99,8 +107,8 @@ func (c *Coach) Chat(systemPrompt string, history []map[string]string, userMessa
 	return "", fmt.Errorf("chat failed after retries: %w", lastErr)
 }
 
-func (c *Coach) doRequest(body []byte) (string, error) {
-	req, err := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+func (c *Coach) doRequest(ctx context.Context, body []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

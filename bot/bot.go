@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -66,17 +67,17 @@ func New(token string, c *coach.Coach, s *store.Store, cfg Config, compendium st
 	return b, nil
 }
 
-func (b *Bot) Run(stop <-chan struct{}) {
+func (b *Bot) Run(ctx context.Context) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = telegramPollTimeout
 
 	updates := b.api.GetUpdatesChan(u)
 
-	go b.dailyScheduler(stop)
+	go b.dailyScheduler(ctx)
 
 	for {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			b.api.StopReceivingUpdates()
 			return
 		case update := <-updates:
@@ -86,29 +87,29 @@ func (b *Bot) Run(stop <-chan struct{}) {
 			if update.Message.From.ID != b.cfg.AllowedUserID {
 				continue
 			}
-			b.handleMessage(update.Message)
+			b.handleMessage(ctx, update.Message)
 		}
 	}
 }
 
-func (b *Bot) handleMessage(msg *tgbotapi.Message) {
+func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 	text := msg.Text
 	chatID := msg.Chat.ID
 
 	if strings.HasPrefix(text, "/") {
-		b.handleCommand(chatID, text)
+		b.handleCommand(ctx, chatID, text)
 		return
 	}
 
-	b.handleChat(chatID, text)
+	b.handleChat(ctx, chatID, text)
 }
 
-func (b *Bot) handleCommand(chatID int64, text string) {
+func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	parts := strings.Fields(text)
 	cmd := strings.TrimPrefix(parts[0], "@"+b.api.Self.UserName)
 	cmd = strings.ToLower(cmd)
 
-	st, err := b.store.EnsureState(b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
+	st, err := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
 	if err != nil {
 		log.Printf("ensure state: %v", err)
 		b.send(chatID, "Something went wrong. Please try again.")
@@ -125,10 +126,10 @@ func (b *Bot) handleCommand(chatID int64, text string) {
 		response = b.buildHelp(st.Language)
 
 	case "/status":
-		response = b.buildStatus(st)
+		response = b.buildStatus(ctx, st)
 
 	case "/rejection":
-		count, err := b.store.AddRejection(b.cfg.AllowedUserID)
+		count, err := b.store.AddRejection(ctx, b.cfg.AllowedUserID)
 		if err != nil {
 			log.Printf("add rejection: %v", err)
 			b.send(chatID, "Could not log rejection. Please try again.")
@@ -137,10 +138,10 @@ func (b *Bot) handleCommand(chatID int64, text string) {
 		response = lang.Getf(st.Language, "rejection_logged", count)
 
 	case "/goal":
-		response = b.handleGoal(parts, st)
+		response = b.handleGoal(ctx, parts, st)
 
 	case "/skip":
-		if err := b.store.MarkCheckin(b.cfg.AllowedUserID); err != nil {
+		if err := b.store.MarkCheckin(ctx, b.cfg.AllowedUserID); err != nil {
 			log.Printf("mark checkin: %v", err)
 			b.send(chatID, "Could not skip check-in. Please try again.")
 			return
@@ -148,13 +149,13 @@ func (b *Bot) handleCommand(chatID int64, text string) {
 		response = lang.Get(st.Language, "checkin_skipped")
 
 	case "/lang":
-		response = b.handleLang(parts, st)
+		response = b.handleLang(ctx, parts, st)
 
 	case "/tone":
-		response = b.handleTone(parts, st)
+		response = b.handleTone(ctx, parts, st)
 
 	case "/reset":
-		if err := b.store.SetConversationHistory(b.cfg.AllowedUserID, []map[string]string{}); err != nil {
+		if err := b.store.SetConversationHistory(ctx, b.cfg.AllowedUserID, []map[string]string{}); err != nil {
 			log.Printf("reset history: %v", err)
 			b.send(chatID, "Could not reset context. Please try again.")
 			return
@@ -183,8 +184,8 @@ func (b *Bot) buildHelp(l string) string {
 		lang.Get(l, "help_help")
 }
 
-func (b *Bot) buildStatus(st *store.State) string {
-	goals, err := b.store.GetGoals(b.cfg.AllowedUserID)
+func (b *Bot) buildStatus(ctx context.Context, st *store.State) string {
+	goals, err := b.store.GetGoals(ctx, b.cfg.AllowedUserID)
 	if err != nil {
 		log.Printf("get goals: %v", err)
 		goals = []string{}
@@ -208,7 +209,7 @@ func (b *Bot) buildStatus(st *store.State) string {
 		lang.Getf(st.Language, "status_lang", st.Language)
 }
 
-func (b *Bot) handleGoal(parts []string, st *store.State) string {
+func (b *Bot) handleGoal(ctx context.Context, parts []string, st *store.State) string {
 	if len(parts) < 2 {
 		return lang.Get(st.Language, "goal_none")
 	}
@@ -224,14 +225,14 @@ func (b *Bot) handleGoal(parts []string, st *store.State) string {
 		if len(goal) > maxGoalLen {
 			return lang.Getf(st.Language, "goal_too_long", maxGoalLen)
 		}
-		if err := b.store.AddGoal(b.cfg.AllowedUserID, goal); err != nil {
+		if err := b.store.AddGoal(ctx, b.cfg.AllowedUserID, goal); err != nil {
 			log.Printf("add goal: %v", err)
 			return "Error adding goal."
 		}
 		return lang.Getf(st.Language, "goal_added", goal)
 
 	case "list":
-		goals, err := b.store.GetGoals(b.cfg.AllowedUserID)
+		goals, err := b.store.GetGoals(ctx, b.cfg.AllowedUserID)
 		if err != nil {
 			log.Printf("list goals: %v", err)
 			return "Error listing goals."
@@ -254,7 +255,7 @@ func (b *Bot) handleGoal(parts []string, st *store.State) string {
 		if err != nil {
 			return lang.Get(st.Language, "goal_invalid")
 		}
-		goals, err := b.store.GetGoals(b.cfg.AllowedUserID)
+		goals, err := b.store.GetGoals(ctx, b.cfg.AllowedUserID)
 		if err != nil {
 			log.Printf("get goals for done: %v", err)
 			return "Error completing goal."
@@ -263,7 +264,7 @@ func (b *Bot) handleGoal(parts []string, st *store.State) string {
 			return lang.Get(st.Language, "goal_invalid")
 		}
 		goalName := goals[idx-1]
-		if err := b.store.CompleteGoal(b.cfg.AllowedUserID, idx-1); err != nil {
+		if err := b.store.CompleteGoal(ctx, b.cfg.AllowedUserID, idx-1); err != nil {
 			log.Printf("complete goal: %v", err)
 			return "Error completing goal."
 		}
@@ -274,7 +275,7 @@ func (b *Bot) handleGoal(parts []string, st *store.State) string {
 	}
 }
 
-func (b *Bot) handleLang(parts []string, st *store.State) string {
+func (b *Bot) handleLang(ctx context.Context, parts []string, st *store.State) string {
 	if len(parts) < 2 {
 		return lang.Getf(st.Language, "lang_current", st.Language)
 	}
@@ -284,14 +285,14 @@ func (b *Bot) handleLang(parts []string, st *store.State) string {
 		return "Invalid language. Use: it, en"
 	}
 
-	if err := b.store.SetLanguage(b.cfg.AllowedUserID, newLang); err != nil {
+	if err := b.store.SetLanguage(ctx, b.cfg.AllowedUserID, newLang); err != nil {
 		log.Printf("set language: %v", err)
 		return "Error setting language."
 	}
 	return lang.Getf(newLang, "lang_switched", newLang)
 }
 
-func (b *Bot) handleTone(parts []string, st *store.State) string {
+func (b *Bot) handleTone(ctx context.Context, parts []string, st *store.State) string {
 	if len(parts) < 2 {
 		return lang.Getf(st.Language, "tone_current", st.Tone) + "\n" +
 			lang.Get(st.Language, "tone_options")
@@ -303,28 +304,28 @@ func (b *Bot) handleTone(parts []string, st *store.State) string {
 		return lang.Get(st.Language, "tone_options")
 	}
 
-	if err := b.store.SetTone(b.cfg.AllowedUserID, newTone); err != nil {
+	if err := b.store.SetTone(ctx, b.cfg.AllowedUserID, newTone); err != nil {
 		log.Printf("set tone: %v", err)
 		return "Error setting tone."
 	}
 	return lang.Getf(st.Language, "tone_switched", newTone)
 }
 
-func (b *Bot) handleChat(chatID int64, text string) {
+func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 	if len(text) > maxMessageLen {
-		st, _ := b.store.EnsureState(b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
+		st, _ := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
 		b.send(chatID, lang.Getf(st.Language, "message_too_long", maxMessageLen))
 		return
 	}
 
-	st, err := b.store.EnsureState(b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
+	st, err := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
 	if err != nil {
 		log.Printf("ensure state: %v", err)
 		b.send(chatID, "Something went wrong. Please try again.")
 		return
 	}
 
-	goals, err := b.store.GetGoals(b.cfg.AllowedUserID)
+	goals, err := b.store.GetGoals(ctx, b.cfg.AllowedUserID)
 	if err != nil {
 		log.Printf("get goals: %v", err)
 		goals = []string{}
@@ -344,14 +345,17 @@ func (b *Bot) handleChat(chatID int64, text string) {
 		rejections,
 	)
 
-	history, err := b.store.GetConversationHistory(b.cfg.AllowedUserID)
+	history, err := b.store.GetConversationHistory(ctx, b.cfg.AllowedUserID)
 	if err != nil {
 		log.Printf("get history: %v", err)
 		history = []map[string]string{}
 	}
 
-	response, err := b.coach.Chat(systemPrompt, history, text)
+	response, err := b.coach.Chat(ctx, systemPrompt, history, text)
 	if err != nil {
+		if ctx.Err() != nil {
+			return // context cancelled, don't send anything
+		}
 		log.Printf("coach chat: %v", err)
 		b.send(chatID, "Sorry, I couldn't process that. Try again.")
 		return
@@ -364,20 +368,20 @@ func (b *Bot) handleChat(chatID int64, text string) {
 		history = history[len(history)-maxHistoryLen:]
 	}
 
-	if err := b.store.SetConversationHistory(b.cfg.AllowedUserID, history); err != nil {
+	if err := b.store.SetConversationHistory(ctx, b.cfg.AllowedUserID, history); err != nil {
 		log.Printf("save history: %v", err)
 	}
 
 	b.send(chatID, response)
 }
 
-func (b *Bot) dailyScheduler(stop <-chan struct{}) {
+func (b *Bot) dailyScheduler(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(schedulerTickMin) * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			now := time.Now().In(b.loc)
@@ -385,7 +389,7 @@ func (b *Bot) dailyScheduler(stop <-chan struct{}) {
 				continue
 			}
 
-			lastCheckin, err := b.store.GetLastCheckin(b.cfg.AllowedUserID)
+			lastCheckin, err := b.store.GetLastCheckin(ctx, b.cfg.AllowedUserID)
 			if err != nil {
 				log.Printf("get last checkin: %v", err)
 				continue
@@ -396,7 +400,7 @@ func (b *Bot) dailyScheduler(stop <-chan struct{}) {
 				continue
 			}
 
-			st, err := b.store.EnsureState(b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
+			st, err := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
 			if err != nil {
 				log.Printf("ensure state: %v", err)
 				continue
@@ -410,7 +414,7 @@ func (b *Bot) dailyScheduler(stop <-chan struct{}) {
 			msg := lang.Getf(st.Language, "checkin_msg", dayNum)
 			b.send(b.cfg.AllowedUserID, msg)
 
-			if err := b.store.MarkCheckin(b.cfg.AllowedUserID); err != nil {
+			if err := b.store.MarkCheckin(ctx, b.cfg.AllowedUserID); err != nil {
 				log.Printf("mark checkin: %v", err)
 			}
 		}

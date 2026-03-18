@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -59,8 +60,8 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) GetState(userID int64) (*State, error) {
-	row := s.db.QueryRow(`
+func (s *Store) GetState(ctx context.Context, userID int64) (*State, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT user_id, current_phase, current_goals, rejection_log,
 		       last_checkin, conversation_history, config_notes, language, tone
 		FROM state WHERE user_id = ?`, userID)
@@ -82,8 +83,8 @@ func (s *Store) GetState(userID int64) (*State, error) {
 	return st, nil
 }
 
-func (s *Store) EnsureState(userID int64, defaultLang, defaultTone string) (*State, error) {
-	st, err := s.GetState(userID)
+func (s *Store) EnsureState(ctx context.Context, userID int64, defaultLang, defaultTone string) (*State, error) {
+	st, err := s.GetState(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +103,7 @@ func (s *Store) EnsureState(userID int64, defaultLang, defaultTone string) (*Sta
 		Tone:                defaultTone,
 	}
 
-	_, err = s.db.Exec(`
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO state (user_id, current_phase, current_goals, rejection_log,
 		                   conversation_history, config_notes, language, tone)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -114,8 +115,8 @@ func (s *Store) EnsureState(userID int64, defaultLang, defaultTone string) (*Sta
 	return st, nil
 }
 
-func (s *Store) UpdateState(st *State) error {
-	_, err := s.db.Exec(`
+func (s *Store) UpdateState(ctx context.Context, st *State) error {
+	_, err := s.db.ExecContext(ctx, `
 		UPDATE state SET
 			current_phase = ?,
 			current_goals = ?,
@@ -132,18 +133,18 @@ func (s *Store) UpdateState(st *State) error {
 	return err
 }
 
-func (s *Store) SetLanguage(userID int64, lang string) error {
-	_, err := s.db.Exec(`UPDATE state SET language = ? WHERE user_id = ?`, lang, userID)
+func (s *Store) SetLanguage(ctx context.Context, userID int64, lang string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE state SET language = ? WHERE user_id = ?`, lang, userID)
 	return err
 }
 
-func (s *Store) SetTone(userID int64, tone string) error {
-	_, err := s.db.Exec(`UPDATE state SET tone = ? WHERE user_id = ?`, tone, userID)
+func (s *Store) SetTone(ctx context.Context, userID int64, tone string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE state SET tone = ? WHERE user_id = ?`, tone, userID)
 	return err
 }
 
-func (s *Store) AddRejection(userID int64) (int, error) {
-	st, err := s.EnsureState(userID, "it", "warm")
+func (s *Store) AddRejection(ctx context.Context, userID int64) (int, error) {
+	st, err := s.EnsureState(ctx, userID, "it", "warm")
 	if err != nil {
 		return 0, err
 	}
@@ -159,15 +160,15 @@ func (s *Store) AddRejection(userID int64) (int, error) {
 		return 0, err
 	}
 
-	_, err = s.db.Exec(`UPDATE state SET rejection_log = ? WHERE user_id = ?`, string(data), userID)
+	_, err = s.db.ExecContext(ctx, `UPDATE state SET rejection_log = ? WHERE user_id = ?`, string(data), userID)
 	if err != nil {
 		return 0, err
 	}
 	return len(rejections), nil
 }
 
-func (s *Store) AddGoal(userID int64, goal string) error {
-	st, err := s.EnsureState(userID, "it", "warm")
+func (s *Store) AddGoal(ctx context.Context, userID int64, goal string) error {
+	st, err := s.EnsureState(ctx, userID, "it", "warm")
 	if err != nil {
 		return err
 	}
@@ -183,12 +184,12 @@ func (s *Store) AddGoal(userID int64, goal string) error {
 		return err
 	}
 
-	_, err = s.db.Exec(`UPDATE state SET current_goals = ? WHERE user_id = ?`, string(data), userID)
+	_, err = s.db.ExecContext(ctx, `UPDATE state SET current_goals = ? WHERE user_id = ?`, string(data), userID)
 	return err
 }
 
-func (s *Store) GetGoals(userID int64) ([]string, error) {
-	st, err := s.EnsureState(userID, "it", "warm")
+func (s *Store) GetGoals(ctx context.Context, userID int64) ([]string, error) {
+	st, err := s.EnsureState(ctx, userID, "it", "warm")
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +200,8 @@ func (s *Store) GetGoals(userID int64) ([]string, error) {
 	return goals, nil
 }
 
-func (s *Store) CompleteGoal(userID int64, index int) error {
-	goals, err := s.GetGoals(userID)
+func (s *Store) CompleteGoal(ctx context.Context, userID int64, index int) error {
+	goals, err := s.GetGoals(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -212,24 +213,24 @@ func (s *Store) CompleteGoal(userID int64, index int) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`UPDATE state SET current_goals = ? WHERE user_id = ?`, string(data), userID)
+	_, err = s.db.ExecContext(ctx, `UPDATE state SET current_goals = ? WHERE user_id = ?`, string(data), userID)
 	return err
 }
 
-func (s *Store) SetConversationHistory(userID int64, messages []map[string]string) error {
-	if _, err := s.EnsureState(userID, "it", "warm"); err != nil {
+func (s *Store) SetConversationHistory(ctx context.Context, userID int64, messages []map[string]string) error {
+	if _, err := s.EnsureState(ctx, userID, "it", "warm"); err != nil {
 		return err
 	}
 	data, err := json.Marshal(messages)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`UPDATE state SET conversation_history = ? WHERE user_id = ?`, string(data), userID)
+	_, err = s.db.ExecContext(ctx, `UPDATE state SET conversation_history = ? WHERE user_id = ?`, string(data), userID)
 	return err
 }
 
-func (s *Store) GetConversationHistory(userID int64) ([]map[string]string, error) {
-	st, err := s.EnsureState(userID, "it", "warm")
+func (s *Store) GetConversationHistory(ctx context.Context, userID int64) ([]map[string]string, error) {
+	st, err := s.EnsureState(ctx, userID, "it", "warm")
 	if err != nil {
 		return nil, err
 	}
@@ -240,18 +241,18 @@ func (s *Store) GetConversationHistory(userID int64) ([]map[string]string, error
 	return msgs, nil
 }
 
-func (s *Store) MarkCheckin(userID int64) error {
-	if _, err := s.EnsureState(userID, "it", "warm"); err != nil {
+func (s *Store) MarkCheckin(ctx context.Context, userID int64) error {
+	if _, err := s.EnsureState(ctx, userID, "it", "warm"); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(`UPDATE state SET last_checkin = ? WHERE user_id = ?`,
+	_, err := s.db.ExecContext(ctx, `UPDATE state SET last_checkin = ? WHERE user_id = ?`,
 		time.Now().Format("2006-01-02"), userID)
 	return err
 }
 
-func (s *Store) GetLastCheckin(userID int64) (string, error) {
+func (s *Store) GetLastCheckin(ctx context.Context, userID int64) (string, error) {
 	var lastCheckin sql.NullString
-	err := s.db.QueryRow(`SELECT last_checkin FROM state WHERE user_id = ?`, userID).Scan(&lastCheckin)
+	err := s.db.QueryRowContext(ctx, `SELECT last_checkin FROM state WHERE user_id = ?`, userID).Scan(&lastCheckin)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
