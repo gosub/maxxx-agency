@@ -13,7 +13,7 @@ import (
 
 func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	parts := strings.Fields(text)
-	cmd := strings.TrimPrefix(parts[0], "@"+b.api.Self.UserName)
+	cmd := strings.TrimPrefix(parts[0], "@"+b.botName)
 	cmd = strings.ToLower(cmd)
 
 	l := logger.With().Int64("chat_id", chatID).Str("cmd", cmd).Logger()
@@ -21,7 +21,7 @@ func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	st, err := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
 	if err != nil {
 		l.Error().Err(err).Msg("ensure state failed")
-		b.send(chatID, "Something went wrong. Please try again.")
+		b.sendMessage(chatID, "Something went wrong. Please try again.")
 		return
 	}
 
@@ -41,7 +41,7 @@ func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 		count, err := b.store.AddRejection(ctx, b.cfg.AllowedUserID)
 		if err != nil {
 			l.Error().Err(err).Msg("add rejection failed")
-			b.send(chatID, "Could not log rejection. Please try again.")
+			b.sendMessage(chatID, "Could not log rejection. Please try again.")
 			return
 		}
 		response = lang.Getf(st.Language, "rejection_logged", count)
@@ -52,7 +52,7 @@ func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	case "/skip":
 		if err := b.store.MarkCheckin(ctx, b.cfg.AllowedUserID); err != nil {
 			l.Error().Err(err).Msg("mark checkin failed")
-			b.send(chatID, "Could not skip check-in. Please try again.")
+			b.sendMessage(chatID, "Could not skip check-in. Please try again.")
 			return
 		}
 		response = lang.Get(st.Language, "checkin_skipped")
@@ -66,7 +66,7 @@ func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	case "/reset":
 		if err := b.store.SetConversationHistory(ctx, b.cfg.AllowedUserID, []map[string]string{}); err != nil {
 			l.Error().Err(err).Msg("reset history failed")
-			b.send(chatID, "Could not reset context. Please try again.")
+			b.sendMessage(chatID, "Could not reset context. Please try again.")
 			return
 		}
 		response = "Conversation context cleared."
@@ -75,7 +75,7 @@ func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 		return
 	}
 
-	b.send(chatID, response)
+	b.sendMessage(chatID, response)
 }
 
 func (b *Bot) buildHelp(l string) string {
@@ -173,7 +173,7 @@ func (b *Bot) handleGoal(ctx context.Context, parts []string, st *store.State) s
 			return lang.Get(st.Language, "goal_invalid")
 		}
 		goalName := goals[idx-1]
-		if err := b.store.CompleteGoal(ctx, b.cfg.AllowedUserID, idx-1); err != nil {
+		if err := b.store.CompleteGoal(ctx, b.cfg.AllowedUserID, idx); err != nil {
 			logger.Error().Err(err).Str("goal", goalName).Msg("complete goal failed")
 			return "Error completing goal."
 		}

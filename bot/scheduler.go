@@ -48,7 +48,7 @@ func (b *Bot) dailyScheduler(ctx context.Context) {
 			}
 
 			msg := lang.Getf(st.Language, "checkin_msg", dayNum)
-			b.send(b.cfg.AllowedUserID, msg)
+			b.sendMessage(b.cfg.AllowedUserID, msg)
 			l.Info().Int("day", dayNum).Msg("daily check-in sent")
 
 			if err := b.store.MarkCheckin(ctx, b.cfg.AllowedUserID); err != nil {

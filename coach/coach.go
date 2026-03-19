@@ -26,6 +26,12 @@ type Coach struct {
 	client *http.Client
 }
 
+type Coacher interface {
+	Chat(ctx context.Context, systemPrompt string, history []map[string]string, userMessage string) (string, error)
+}
+
+var _ Coacher = (*Coach)(nil)
+
 func New(apiKey, model string) *Coach {
 	return &Coach{
 		apiKey: apiKey,

@@ -37,14 +37,16 @@ type Config struct {
 
 type Bot struct {
 	api        *tgbotapi.BotAPI
-	coach      *coach.Coach
-	store      *store.Store
+	coach      coach.Coacher
+	store      store.Storager
 	cfg        Config
 	compendium string
 	loc        *time.Location
+	send       func(chatID int64, text string)
+	botName    string
 }
 
-func New(token string, c *coach.Coach, s *store.Store, cfg Config, compendium string) (*Bot, error) {
+func New(token string, c coach.Coacher, s store.Storager, cfg Config, compendium string) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("init telegram: %w", err)
@@ -62,7 +64,9 @@ func New(token string, c *coach.Coach, s *store.Store, cfg Config, compendium st
 		cfg:        cfg,
 		compendium: compendium,
 		loc:        loc,
+		botName:    api.Self.UserName,
 	}
+	b.send = b.sendMessage
 
 	logger.Info().Str("account", api.Self.UserName).Msg("authorized on telegram")
 	return b, nil
@@ -114,16 +118,20 @@ func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 	l := logger.With().Int64("chat_id", chatID).Logger()
 
+	if ctx.Err() != nil {
+		return
+	}
+
 	if len(text) > maxMessageLen {
 		st, _ := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
-		b.send(chatID, lang.Getf(st.Language, "message_too_long", maxMessageLen))
+		b.sendMessage(chatID, lang.Getf(st.Language, "message_too_long", maxMessageLen))
 		return
 	}
 
 	st, err := b.store.EnsureState(ctx, b.cfg.AllowedUserID, b.cfg.Language, b.cfg.Tone)
 	if err != nil {
 		l.Error().Err(err).Msg("ensure state failed")
-		b.send(chatID, "Something went wrong. Please try again.")
+		b.sendMessage(chatID, "Something went wrong. Please try again.")
 		return
 	}
 
@@ -160,7 +168,7 @@ func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 			return
 		}
 		l.Error().Err(err).Msg("coach chat failed")
-		b.send(chatID, "Sorry, I couldn't process that. Try again.")
+		b.sendMessage(chatID, "Sorry, I couldn't process that. Try again.")
 		return
 	}
 
@@ -175,16 +183,22 @@ func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 		l.Error().Err(err).Msg("save history failed")
 	}
 
-	b.send(chatID, response)
+	b.sendMessage(chatID, response)
 }
 
-func (b *Bot) send(chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
-	if _, err := b.api.Send(msg); err != nil {
-		msg.ParseMode = ""
-		if _, err2 := b.api.Send(msg); err2 != nil {
-			logger.Error().Err(err2).Int64("chat_id", chatID).Msg("send message failed")
+func (b *Bot) sendMessage(chatID int64, text string) {
+	if b.api != nil {
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ParseMode = "Markdown"
+		if _, err := b.api.Send(msg); err != nil {
+			msg.ParseMode = ""
+			if _, err2 := b.api.Send(msg); err2 != nil {
+				logger.Error().Err(err2).Int64("chat_id", chatID).Msg("send message failed")
+			}
 		}
+		return
+	}
+	if b.send != nil {
+		b.send(chatID, text)
 	}
 }

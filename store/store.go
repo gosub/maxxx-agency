@@ -26,6 +26,24 @@ type Store struct {
 	db *sql.DB
 }
 
+type Storager interface {
+	EnsureState(ctx context.Context, userID int64, defaultLang, defaultTone string) (*State, error)
+	GetState(ctx context.Context, userID int64) (*State, error)
+	UpdateState(ctx context.Context, st *State) error
+	SetLanguage(ctx context.Context, userID int64, lang string) error
+	SetTone(ctx context.Context, userID int64, tone string) error
+	AddRejection(ctx context.Context, userID int64) (int, error)
+	AddGoal(ctx context.Context, userID int64, goal string) error
+	GetGoals(ctx context.Context, userID int64) ([]string, error)
+	CompleteGoal(ctx context.Context, userID int64, index int) error
+	SetConversationHistory(ctx context.Context, userID int64, messages []map[string]string) error
+	GetConversationHistory(ctx context.Context, userID int64) ([]map[string]string, error)
+	MarkCheckin(ctx context.Context, userID int64) error
+	GetLastCheckin(ctx context.Context, userID int64) (string, error)
+}
+
+var _ Storager = (*Store)(nil)
+
 func New(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
