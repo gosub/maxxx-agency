@@ -78,6 +78,7 @@ func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 	}
 
 	prompt := agent.BuildChatPrompt(p.Language, p.Schedule, tasks, time.Now().In(b.loc))
+	logger.Trace().Str("prompt", prompt).Msg("chat system prompt")
 	raw, err := b.agent.Chat(ctx, prompt, text)
 	if err != nil {
 		if ctx.Err() != nil {

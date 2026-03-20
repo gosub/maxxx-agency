@@ -52,6 +52,7 @@ func (b *Bot) runNudgeCycle(ctx context.Context) {
 	}
 
 	prompt := agent.BuildNudgePrompt(p.Language, p.Schedule, due, now)
+	l.Trace().Str("prompt", prompt).Msg("nudge system prompt")
 	raw, err := b.agent.Chat(ctx, prompt, "nudge")
 	if err != nil {
 		if ctx.Err() != nil {
@@ -61,6 +62,7 @@ func (b *Bot) runNudgeCycle(ctx context.Context) {
 		return
 	}
 
+	l.Debug().Str("raw", raw).Msg("nudge agent response")
 	resp, err := agent.ParseResponse(raw)
 	if err != nil {
 		l.Warn().Err(err).Str("raw", raw).Msg("failed to parse nudge response")
