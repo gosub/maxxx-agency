@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"maxxx-agency/lang"
-	"maxxx-agency/store"
+	"nudgent/lang"
+	"nudgent/store"
 )
 
 type mockStore struct {

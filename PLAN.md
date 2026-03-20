@@ -9,7 +9,7 @@ The bot's knowledge base is derived from the [Agency Compendium](./AGENCY-COMPEN
 ## Project Structure
 
 ```
-maxxx-agency/
+nudgent/
 ├── main.go              # Entry point, env + TOML loading, wiring
 ├── bot/
 │   └── bot.go           # Telegram polling, commands, scheduler
@@ -68,7 +68,7 @@ Config references env var **names** (not values). At startup, `os.Getenv()` reso
 
 ```
 .env
-maxxx-agency
+nudgent
 agency.db
 ```
 
@@ -248,8 +248,8 @@ The AI receives:
 
 ## Deployment
 
-- `go build -o maxxx-agency` — single static binary, no CGO
-- Runs as: `./maxxx-agency` (reads `config.toml` + `.env` from working dir)
+- `go build -o nudgent` — single static binary, no CGO
+- Runs as: `./nudgent` (reads `config.toml` + `.env` from working dir)
 - Creates `agency.db` on first run
 - Can run with `systemd`, `screen`, `nohup`
 - Graceful shutdown on SIGINT/SIGTERM (flushes conversation history to SQLite)

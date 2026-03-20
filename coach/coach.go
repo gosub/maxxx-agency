@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"maxxx-agency/log"
+	"nudgent/log"
 )
 
 const (

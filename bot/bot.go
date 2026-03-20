@@ -9,10 +9,10 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"maxxx-agency/coach"
-	"maxxx-agency/lang"
-	"maxxx-agency/log"
-	"maxxx-agency/store"
+	"nudgent/coach"
+	"nudgent/lang"
+	"nudgent/log"
+	"nudgent/store"
 )
 
 const (

@@ -18,8 +18,8 @@ Personal agency coach bot. Runs as a single Go binary, communicates via Telegram
 1. Clone the repo
 
 ```
-git clone https://github.com/gosub/maxxx-agency.git
-cd maxxx-agency
+git clone https://github.com/gosub/nudgent.git
+cd nudgent
 ```
 
 2. Copy the example env file and fill in your secrets
@@ -51,7 +51,7 @@ bot_name = "Maxxx Agency"
 
 ```
 make build
-./maxxx-agency
+./nudgent
 ```
 
 ## Commands
@@ -73,7 +73,7 @@ make build
 ## Project Structure
 
 ```
-maxxx-agency/
+nudgent/
 ├── main.go              # Entry point, config loading, wiring
 ├── bot/
 │   └── bot.go           # Telegram polling, commands, scheduler

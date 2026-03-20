@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"maxxx-agency/lang"
-	"maxxx-agency/store"
+	"nudgent/lang"
+	"nudgent/store"
 )
 
 func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {

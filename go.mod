@@ -1,4 +1,4 @@
-module maxxx-agency
+module github.com/gosub/nudgent
 
 go 1.26.1
 

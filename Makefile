@@ -1,6 +1,6 @@
 .PHONY: build clean run fmt vet tidy lint test help
 
-BINARY := maxxx-agency
+BINARY := nudgent
 DB     := agency.db
 
 help: ## Show this help
