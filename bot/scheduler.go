@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"nudgent/lang"
+	"github.com/gosub/nudgent/lang"
 )
 
 func (b *Bot) dailyScheduler(ctx context.Context) {

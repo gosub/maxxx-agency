@@ -11,10 +11,10 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/joho/godotenv"
 
-	"nudgent/bot"
-	"nudgent/coach"
-	"nudgent/log"
-	"nudgent/store"
+	"github.com/gosub/nudgent/bot"
+	"github.com/gosub/nudgent/coach"
+	"github.com/gosub/nudgent/log"
+	"github.com/gosub/nudgent/store"
 )
 
 type Config struct {

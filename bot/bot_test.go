@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"nudgent/lang"
-	"nudgent/store"
+	"github.com/gosub/nudgent/lang"
+	"github.com/gosub/nudgent/store"
 )
 
 type mockStore struct {

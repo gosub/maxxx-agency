@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"nudgent/log"
+	"github.com/gosub/nudgent/log"
 )
 
 const (
