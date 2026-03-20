@@ -1,17 +1,26 @@
-# Maxxx Agency
+# Nudgent
 
-Personal agency coach bot. Runs as a single Go binary, communicates via Telegram, powered by OpenRouter free-tier models.
+Intelligent nudge agent. Tracks your tasks, knows your schedule, and nudges you at the right time.
 
-## Features
+Runs as a single Go binary, communicates via Telegram, powered by OpenRouter models.
 
-- Daily check-in messages at a configured hour
-- On-demand coaching conversations with AI
-- Rejection logging game
-- Goal tracking (add, list, complete)
-- Bilingual support (English and Italian)
-- Configurable tone (warm, direct, drill-sergeant)
-- Conversation context preserved across sessions
-- Single binary, no CGO, SQLite for state
+## How it works
+
+You talk to the bot in plain language. It understands what you mean, stores tasks as freeform descriptions, and wakes up periodically to nudge you when something is due. Recurrence, priority, and context all live in the task description — no rigid fields, no forms.
+
+```
+You:    add call dentist before end of March, working hours
+Bot:    Added: "Call dentist — before end of March, working hours".
+
+You:    done with the gym
+Bot:    Marked "Gym" as done.
+
+You:    push the report to Thursday morning
+Bot:    Rescheduled "Write report" to Thursday 09:00.
+
+[nudge, unprompted]
+Bot:    "Call dentist" is overdue — end of March is tomorrow.
+```
 
 ## Quick Start
 
@@ -28,7 +37,7 @@ cd nudgent
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
+Edit `.env`:
 
 ```
 TELEGRAM_TOKEN=your-telegram-bot-token
@@ -36,15 +45,13 @@ OPENROUTER_KEY=your-openrouter-api-key
 ALLOWED_USER_ID=your-telegram-numeric-id
 ```
 
-3. Adjust `config.toml` to your preferences
+3. Adjust `config.toml` if needed
 
 ```toml
-daily_checkin_hour = 9
-timezone = "Europe/Rome"
-model = "google/gemma-3-1b-it:free"
-language = "it"
-tone = "warm"
-bot_name = "Maxxx Agency"
+timezone         = "Europe/Rome"
+model            = "openai/gpt-4o-mini"
+language         = "en"
+nudge_interval_m = 30
 ```
 
 4. Build and run
@@ -56,51 +63,23 @@ make build
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Welcome message |
-| `/status` | Show current phase, goals, rejections |
-| `/rejection` | Log a rejection |
-| `/goal add <text>` | Add a goal |
-| `/goal list` | List goals |
-| `/goal done <n>` | Complete a goal |
-| `/skip` | Skip today's check-in |
-| `/lang it` or `/lang en` | Switch language |
-| `/tone warm\|direct\|drill-sergeant` | Switch tone |
-| `/reset` | Clear conversation context |
-| `/help` | List all commands |
+| Command  | Description              |
+|----------|--------------------------|
+| `/tasks` | List active tasks        |
+| `/help`  | Show usage               |
+
+Everything else — adding tasks, marking done, rescheduling, setting your schedule — is plain chat.
 
 ## Project Structure
 
 ```
 nudgent/
-├── main.go              # Entry point, config loading, wiring
-├── bot/
-│   └── bot.go           # Telegram polling, commands, scheduler
-├── coach/
-│   ├── prompts.go       # System prompt builder
-│   └── coach.go         # OpenRouter API calls
-├── store/
-│   └── store.go         # SQLite state management
-├── lang/
-│   └── strings.go       # Bilingual string tables (en, it)
-├── config.toml          # Configuration
-├── .env.example         # Example secrets file
-├── AGENCY-COMPENDIUM.md # Agency knowledge base
-├── Makefile
-└── PLAN.md              # Full implementation plan
+├── main.go        # Entry point, config loading, wiring
+├── bot/           # Telegram polling, command and chat handlers, nudge engine
+├── agent/         # OpenRouter client, system prompt builder, action parser
+├── store/         # SQLite: tasks and prefs
+└── lang/          # Bilingual strings (en, it)
 ```
-
-## Agency Framework
-
-The bot's coaching is based on the Agency Compendium, a comprehensive framework for building personal agency through four phases:
-
-- **Phase 0: Substrate** - Fix sleep, diet, exercise, start meditation
-- **Phase 1: Mindset Shifts** - Detect imaginary rules, identify blockers
-- **Phase 2: Action Habits** - Rejection logging, weekly asks, 100x challenges
-- **Phase 3: Strategic Integration** - Communities, cross-pollination, quarterly review
-
-See `AGENCY-COMPENDIUM.md` for the full reference.
 
 ## Dependencies
 
@@ -109,8 +88,9 @@ See `AGENCY-COMPENDIUM.md` for the full reference.
 | `github.com/BurntSushi/toml` | TOML config parsing |
 | `github.com/joho/godotenv` | .env file loading |
 | `github.com/go-telegram-bot-api/telegram-bot-api/v5` | Telegram bot API |
+| `github.com/rs/zerolog` | Structured logging |
 | `modernc.org/sqlite` | Pure Go SQLite |
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
+GNU General Public License v3.0. See [LICENSE](LICENSE) for details.

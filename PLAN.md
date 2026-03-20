@@ -1,8 +1,8 @@
-# Maxxx Agency — Implementation Plan
+# Nudgent — Implementation Plan
 
-Personal agency coach bot. Runs as a single Go binary, communicates via Telegram, powered by OpenRouter free-tier models.
+Intelligent nudge agent. Runs as a single Go binary, communicates via Telegram, powered by OpenRouter models.
 
-The bot's knowledge base is derived from the [Agency Compendium](./AGENCY-COMPENDIUM.md) — a comprehensive synthesis of ideas on building personal agency. The compendium is injected into the system prompt and referenced by the coach during conversations.
+The agent tracks tasks (one-off and recurrent), knows the user's schedule, wakes up every N minutes, and decides when and how to nudge. All task management happens through natural language chat; the LLM interprets intent and returns structured actions the bot executes.
 
 ---
 
@@ -12,23 +12,35 @@ The bot's knowledge base is derived from the [Agency Compendium](./AGENCY-COMPEN
 nudgent/
 ├── main.go              # Entry point, env + TOML loading, wiring
 ├── bot/
-│   └── bot.go           # Telegram polling, commands, scheduler
-├── coach/
-│   ├── prompts.go       # System prompt builder (language + tone + plan)
-│   └── coach.go         # OpenRouter API calls
+│   ├── bot.go           # Telegram polling, message routing
+│   ├── handlers.go      # Command and chat handlers
+│   ├── nudge.go         # Nudge engine (scheduled goroutine)
+│   └── bot_test.go
+├── agent/
+│   ├── agent.go         # OpenRouter HTTP client
+│   ├── prompt.go        # System prompt builder
+│   ├── actions.go       # Action types and JSON parsing
+│   └── agent_test.go
 ├── store/
-│   └── store.go         # SQLite: user state, conversation history
+│   ├── store.go         # SQLite: tasks, prefs
+│   └── store_test.go
 ├── lang/
 │   └── strings.go       # Bilingual string tables (en, it)
-├── config.toml          # Config (committed)
-├── .env                 # Secrets (gitignored)
-├── .env.example         # Example env file (committed)
-├── .gitignore           # .env, binary, agency.db
-├── PLAN.md              # This file
-├── AGENCY-COMPENDIUM.md # Agency knowledge base (injected into system prompt)
+├── log/
+│   └── log.go           # zerolog wrapper
+├── config.toml
+├── .env
+├── .env.example
+├── .gitignore
+├── PLAN.md
+├── Makefile
 ├── go.mod
 └── go.sum
 ```
+
+Note: `coach/` renamed to `agent/`.
+
+---
 
 ## Secrets & Configuration
 
@@ -40,244 +52,183 @@ OPENROUTER_KEY=
 ALLOWED_USER_ID=
 ```
 
-### `.env.example` (committed)
-
-```
-TELEGRAM_TOKEN=
-OPENROUTER_KEY=
-ALLOWED_USER_ID=
-```
-
 ### `config.toml` (committed)
 
 ```toml
-telegram_token_env = "TELEGRAM_TOKEN"
-openrouter_key_env = "OPENROUTER_KEY"
+telegram_token_env  = "TELEGRAM_TOKEN"
+openrouter_key_env  = "OPENROUTER_KEY"
 allowed_user_id_env = "ALLOWED_USER_ID"
-daily_checkin_hour = 9
-timezone = "Europe/Rome"
-model = "google/gemma-3-1b-it:free"
-language = "it"
-tone = "warm"
-bot_name = "Maxxx Agency"
+timezone            = "Europe/Rome"
+model               = "openai/gpt-4o-mini"
+language            = "en"
+nudge_interval_m    = 30
 ```
 
-Config references env var **names** (not values). At startup, `os.Getenv()` resolves them. Fail fast if missing.
-
-### `.gitignore`
-
-```
-.env
-nudgent
-agency.db
-```
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `github.com/BurntSushi/toml` | TOML config parsing |
-| `github.com/joho/godotenv` | .env file loading |
-| `github.com/go-telegram-bot-api/telegram-bot-api/v5` | Telegram bot API |
-| `modernc.org/sqlite` | Pure Go SQLite (no CGO) |
+---
 
 ## Database Schema (SQLite)
 
 ```sql
-CREATE TABLE IF NOT EXISTS state (
-    user_id              INTEGER PRIMARY KEY,
-    current_phase        INTEGER DEFAULT 0,
-    current_goals        TEXT DEFAULT '[]',
-    rejection_log        TEXT DEFAULT '[]',
-    last_checkin         TEXT,
-    conversation_history TEXT DEFAULT '[]',
-    config_notes         TEXT DEFAULT '',
-    language             TEXT DEFAULT 'it',
-    tone                 TEXT DEFAULT 'warm'
+CREATE TABLE IF NOT EXISTS tasks (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    description   TEXT    NOT NULL,   -- freeform, as understood by the LLM
+    next_nudge_at TEXT,               -- ISO 8601; set by LLM, used by scheduler
+    done          INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS prefs (
+    user_id          INTEGER PRIMARY KEY,
+    language         TEXT    NOT NULL DEFAULT 'en',
+    nudge_interval_m INTEGER NOT NULL DEFAULT 30,
+    schedule         TEXT    NOT NULL DEFAULT '',  -- freeform, e.g. "weekdays 9-13 and 15-19"
+    last_wakeup_at   TEXT                          -- last successful scheduler tick (ISO 8601)
 );
 ```
 
-Single table, one row per user.
+### Design rationale
 
-## Agent Identity
+- Task descriptions are freeform text. Recurrence, priority, context, and any other metadata live inside the description as natural language. The LLM re-interprets them on each interaction.
+- `next_nudge_at` is the only structured field on tasks. It lets the scheduler do a simple DB query without an LLM call on every tick. The LLM sets it — accounting for the user's schedule — whenever it processes a task.
+- Schedule is a single freeform string in `prefs`, injected into every LLM call as global context. It is not parsed by application code.
+- `last_wakeup_at` records the last successful scheduler tick. On restart, the scheduler resumes from there, catching any nudges that should have fired during downtime (their `next_nudge_at` will be in the past and will be picked up naturally).
 
-- **Name:** Maxxx Agency
-- **Welcome (it):** `"Ciao, sono Maxxx Agency. Il tuo coach personale per costruire agency. Dove vuoi iniziare?"`
-- **System prompt preamble:** *"You are Maxxx Agency, a personal agency coach. You are concise, direct, and push when needed. Never preachy."*
+---
 
-## Language
+## LLM Action Protocol
 
-- `language` in config: `"it"` or `"en"`
-- All bot-side strings in `lang/strings.go` keyed by language code
-- System prompt adds: *"Always respond in {language}."*
-- `/lang it` or `/lang en` to switch at runtime (persists to SQLite)
+Every user chat message is sent to the LLM with the system prompt below. The LLM always responds with a JSON envelope:
 
-### String Table Example (`lang/strings.go`)
-
-```go
-var strings = map[string]map[string]string{
-    "en": {
-        "welcome":           "Welcome back. Where are you in the plan?",
-        "status_header":     "Your current status:",
-        "rejection_logged":  "Logged! Total: %d. Keep going.",
-        "tone_current":      "Current tone: %s",
-        "lang_current":      "Current language: %s",
-    },
-    "it": {
-        "welcome":           "Bentornato. Dove sei nel piano?",
-        "status_header":     "Il tuo stato attuale:",
-        "rejection_logged":  "Registrato! Totale: %d. Continua così.",
-        "tone_current":      "Tono attuale: %s",
-        "lang_current":      "Lingua attuale: %s",
-    },
+```json
+{
+  "reply": "Got it. Added 'Call dentist' for tomorrow at 15:00.",
+  "actions": [
+    { "type": "add_task",        "description": "Call dentist — tomorrow 15:00, working hours" },
+    { "type": "set_next_nudge",  "id": 12, "next_nudge_at": "2026-03-21T15:00:00" },
+    { "type": "update_task",     "id": 5,  "description": "Gym — Monday and Thursday mornings" },
+    { "type": "complete_task",   "id": 3 },
+    { "type": "delete_task",     "id": 7 },
+    { "type": "update_schedule", "schedule": "weekdays 9-13 and 15-19" }
+  ]
 }
 ```
 
-## Tone
+- `reply` is always present and shown to the user verbatim.
+- `actions` may be empty.
+- The bot executes actions against the store, then sends `reply`.
+- If JSON parsing fails, the raw LLM text is sent with no actions executed.
 
-`tone` in config: `"warm"`, `"direct"`, `"drill-sergeant"`
+### Chat System Prompt
 
-Injected into system prompt as behavioral modifier:
+```
+You are Nudgent, an intelligent task and nudge assistant.
+You help the user track tasks, remember commitments, and get things done.
+Be concise and direct. Always respond in {language}.
 
-| Tone | System prompt addition |
-|------|----------------------|
-| `warm` | *"Be warm and encouraging. Celebrate small wins. Gentle nudges."* |
-| `direct` | *"Be direct and efficient. Short responses. No fluff. Get to the point."* |
-| `drill-sergeant` | *"Be intense and demanding. Push hard. No excuses. Tough love."* |
+Current time: {ISO datetime with timezone}
 
-`/tone` (no args) — show current tone and available options.
-`/tone warm|direct|drill-sergeant` — switch tone, persists to SQLite.
+User's schedule:
+{prefs.schedule — or "not set" if empty}
 
-## Commands
+Active tasks:
+{id}. {description} — next nudge: {next_nudge_at or "not set"}
+...
+(done tasks omitted)
+
+Respond ONLY with a JSON object: {"reply": "...", "actions": [...]}
+No text outside the JSON. If no actions are needed, use "actions": [].
+
+When setting next_nudge_at, use ISO 8601 and respect the user's schedule.
+```
+
+---
+
+## Nudge Engine
+
+A goroutine wakes every `nudge_interval_m` minutes:
+
+1. Load `last_wakeup_at` from prefs.
+2. Query tasks where `done = 0 AND next_nudge_at <= now`.
+3. If none, update `last_wakeup_at` and sleep.
+4. Send the nudge prompt to the LLM with the matching tasks.
+5. If `reply` is non-empty, send it to the user.
+6. Execute any actions returned (e.g. `set_next_nudge` to advance a recurrent task).
+7. Update `last_wakeup_at = now`.
+
+### Nudge System Prompt
+
+```
+You are Nudgent, a nudge agent.
+Current time: {datetime}. User's schedule: {schedule}.
+
+The following tasks are due for a nudge:
+{id}. {description}
+...
+
+Send the user a short nudge message. One task, one sentence, no fluff.
+If multiple tasks are due, pick the most urgent one.
+
+Respond: {"reply": "...", "actions": [...]}
+Use actions to update next_nudge_at for recurrent tasks after nudging.
+```
+
+---
+
+## Bot Commands
+
+Slash commands are minimal. All real interaction is natural language chat.
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome message in current language |
-| `/status` | Phase, goals, rejections, tone, language |
-| `/rejection` | Quick-log a rejection |
-| `/goal` | Add / view / complete a goal |
-| `/skip` | Skip today's check-in |
-| `/lang` | Show current language |
-| `/lang it` | Switch to Italian |
-| `/lang en` | Switch to English |
-| `/tone` | Show current tone |
-| `/tone warm` | Set tone to warm |
-| `/tone direct` | Set tone to direct |
-| `/tone drill-sergeant` | Set tone to drill-sergeant |
-| `/reset` | Clear conversation context |
-| `/help` | List commands in current language |
+| `/tasks` | List active tasks with next nudge times |
+| `/help`  | Show usage |
 
-## Interaction Modes
+---
 
-### 1. Daily Check-in (scheduled)
+## Interaction Examples
 
-- Goroutine with 1-minute ticker, timezone-aware
-- Sends at configured hour (e.g. 9 AM)
-- Skips if already sent today (`last_checkin` check)
-- Short, casual, phase-appropriate. Examples:
-  - "Day 5 of the rejection game. Got any for me today?"
-  - "You've been on Phase 2 for 2 weeks. Ready for Phase 3?"
-- No follow-up if user doesn't respond — not nosy
+```
+User: add call dentist before end of March, working hours
+Bot:  Added: "Call dentist — before end of March, working hours".
 
-### 2. On-demand (user messages bot)
+User: done with the gym
+Bot:  Marked "Gym" as done.
 
-- Full conversation mode with recent context
-- AI sees: current phase, active goals, rejection count, tone, language
-- Can review progress, suggest actions, log rejections, adjust goals, work through blockers
-- Conversation history capped at last 20 messages (fits free model context window)
+User: push the report to Thursday morning
+Bot:  Rescheduled "Write report" to Thursday 09:00.
 
-## System Prompt Structure
+User: my schedule is weekdays 9 to 1 and 3 to 7
+Bot:  Got it. I'll only nudge you during those hours.
 
-The AI receives:
+[nudge, unprompted]
+Bot:  "Call dentist" is overdue — end of March is tomorrow.
+```
 
-1. **Identity:** "You are Maxxx Agency..."
-2. **Language instruction:** "Always respond in Italian."
-3. **Tone instruction:** "Be warm and encouraging..."
-4. **The agency framework** — the full [Agency Compendium](./AGENCY-COMPENDIUM.md) is read at startup and included in the system prompt as reference material for the coach
-5. **Current state:**
-   - Phase: 2 (Mindset Shifts)
-   - Active goals: ["Read Dune", "Start rejection log"]
-   - Rejections logged: 3
-   - Last check-in: 2026-03-17
-6. **Behavioral rules:**
-   - Ask one good question at a time
-   - Don't be nosy — brief check-ins, go deeper only if user engages
-   - Push gently when detecting avoidance or procrastination
-   - Celebrate rejections and small wins
-   - Suggest next phase when current tasks are done
-
-## Agency Framework (Embedded Reference)
-
-### Phase 0: Substrate (Weeks 1-2)
-- Fix sleep, diet, exercise
-- 5-min daily meditation
-- Read one inspiring book
-
-### Phase 1: Mindset Shifts (Weeks 2-4)
-- Detect imaginary rules
-- Identify petty tyrants
-- Expand option spaces
-
-### Phase 2: Action Habits (Weeks 4-8)
-- Ask for one thing per week
-- Rejection logging game
-- "Do it 100 times" challenge
-- Create serendipity vehicles
-
-### Phase 3: Strategic Integration (Ongoing)
-- Join/build communities
-- Seek forgiveness not permission
-- Cross-pollinate ideas
-- Quarterly review
-
-### Key Principles
-1. Thinking about agency increases it — but don't overthink, act
-2. Community is an agency multiplier
-3. Rejection is signal, not failure
-4. You have more freedom than you think
-5. The option space is wider than it appears
-6. Sustainability > intensity
-7. Cross-pollination of ideas
-
-## Security
-
-- Only `allowed_user_id` gets responses — all other Telegram users ignored silently
-- Secrets in `.env`, never committed
-- Config only references env var names, never values
-- No logging of message contents or API keys
-
-## Deployment
-
-- `go build -o nudgent` — single static binary, no CGO
-- Runs as: `./nudgent` (reads `config.toml` + `.env` from working dir)
-- Creates `agency.db` on first run
-- Can run with `systemd`, `screen`, `nohup`
-- Graceful shutdown on SIGINT/SIGTERM (flushes conversation history to SQLite)
+---
 
 ## Build Order
 
-1. **Project init:** `go mod init`, create all files, `.env`, `.env.example`, `config.toml`, `.gitignore`
-2. **`main.go`:** load `.env` via godotenv, parse TOML, resolve env vars, validate, print startup
-3. **`store/store.go`:** SQLite init + CRUD for user state
-4. **`lang/strings.go`:** bilingual string tables (en + it)
-5. **`coach/prompts.go`:** system prompt builder with language/tone/phase/goals injection
-6. **`coach/coach.go`:** OpenRouter HTTP POST, retry logic, response parsing
-7. **`bot/bot.go`:** Telegram polling, message routing, all commands, daily scheduler goroutine
-8. **Wiring in `main.go`:** connect store, coach, bot; graceful shutdown
-9. **Test:** run locally, message on Telegram, verify responses
-10. **Polish:** error handling, logging, edge cases
+1. **store:** new `store/store.go` — tasks + prefs CRUD, drop all agency tables
+2. **agent:** rename `coach/` → `agent/`, update import paths; rewrite `prompt.go` and add `actions.go`
+3. **bot/handlers:** strip agency commands, add `/tasks`, route all chat through agent
+4. **bot/nudge:** replace `dailyScheduler` with new `nudge.go`
+5. **main.go:** update `Config` struct, wire new store + agent
+6. **cleanup:** remove `AGENCY-COMPENDIUM.md`, dead lang strings, old handler tests
+7. **tests:** update mock store interface, rewrite handler + action parsing tests
+
+---
 
 ## Testing Checklist
 
-- [ ] Bot starts, prints welcome, no panics
-- [ ] `/start` works, prints in Italian
-- [ ] Send a message, get a coherent AI response in Italian
-- [ ] `/rejection` logs and confirms
-- [ ] `/goal add "Read Dune"` adds a goal
-- [ ] `/status` shows correct state
-- [ ] `/tone direct` switches tone, `/status` reflects it
-- [ ] `/lang en` switches to English, responses now in English
-- [ ] Daily check-in fires at configured hour
-- [ ] `/skip` suppresses next check-in
-- [ ] Messages from non-allowed user IDs are ignored
-- [ ] Kill process (Ctrl+C), restart — state is preserved
+- [ ] Bot starts, no panics, logs startup config
+- [ ] `/tasks` returns empty list on first run
+- [ ] "add buy milk tomorrow 9am" → task appears in `/tasks`
+- [ ] "done with milk" → task removed
+- [ ] "push milk to Friday" → next_nudge_at updated
+- [ ] Recurrent task: after nudge, next_nudge_at advances to next occurrence
+- [ ] Nudge fires when next_nudge_at <= now
+- [ ] No nudge when task list is empty
+- [ ] Bot restarts with pending nudge in the past → nudge fires on next tick
+- [ ] Schedule set via chat → injected into subsequent LLM calls
+- [ ] Messages from non-allowed user IDs are silently ignored
+- [ ] Kill + restart — tasks and prefs persist
