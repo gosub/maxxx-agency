@@ -10,7 +10,6 @@ type ActionType string
 const (
 	ActionAddTask        ActionType = "add_task"
 	ActionUpdateTask     ActionType = "update_task"
-	ActionSetNextNudge   ActionType = "set_next_nudge"
 	ActionCompleteTask   ActionType = "complete_task"
 	ActionDeleteTask     ActionType = "delete_task"
 	ActionUpdateSchedule ActionType = "update_schedule"
@@ -19,8 +18,8 @@ const (
 type Action struct {
 	Type        ActionType `json:"type"`
 	Description string     `json:"description,omitempty"` // add_task, update_task
-	ID          int64      `json:"id,omitempty"`          // update_task, set_next_nudge, complete_task, delete_task
-	NextNudgeAt string     `json:"next_nudge_at,omitempty"` // set_next_nudge
+	ID          int64      `json:"id,omitempty"`          // update_task, complete_task, delete_task
+	NextNudgeAt string     `json:"next_nudge_at,omitempty"` // add_task, update_task
 	Schedule    string     `json:"schedule,omitempty"`    // update_schedule
 }
 

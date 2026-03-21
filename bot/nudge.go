@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gosub/nudgent/agent"
@@ -53,7 +54,9 @@ func (b *Bot) runNudgeCycle(ctx context.Context) {
 
 	prompt := agent.BuildNudgePrompt(p.Language, p.Schedule, due, now)
 	l.Trace().Str("prompt", prompt).Msg("nudge system prompt")
-	raw, err := b.agent.Chat(ctx, prompt, "nudge")
+
+	trigger := fmt.Sprintf("Nudge check at %s. %d task(s) due for a reminder.", nowISO, len(due))
+	raw, err := b.agent.Chat(ctx, prompt, nil, trigger)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -69,8 +72,20 @@ func (b *Bot) runNudgeCycle(ctx context.Context) {
 		return
 	}
 
-	if err := b.executeActions(ctx, resp.Actions); err != nil {
-		l.Error().Err(err).Msg("nudge actions failed")
+	b.executeActions(ctx, resp.Actions)
+
+	// Clear next_nudge_at for any tasks still due (LLM didn't reschedule them).
+	// Prevents tasks from firing every cycle until the user or LLM sets a new time.
+	stillDue, err := b.store.GetDueTasks(ctx, b.cfg.AllowedUserID, nowISO)
+	if err == nil {
+		for _, t := range stillDue {
+			if err := b.store.SetNextNudgeAt(ctx, t.ID, ""); err != nil {
+				l.Error().Err(err).Int64("id", t.ID).Msg("clear nudge failed")
+			}
+		}
+		if len(stillDue) > 0 {
+			l.Debug().Int("cleared", len(stillDue)).Msg("cleared unrescheduled nudge times")
+		}
 	}
 
 	if resp.Reply != "" {

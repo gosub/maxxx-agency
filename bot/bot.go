@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -17,6 +18,7 @@ import (
 const (
 	maxMessageLen       = 4000
 	telegramPollTimeout = 60
+	minMsgInterval      = time.Second
 )
 
 type Config struct {
@@ -27,14 +29,16 @@ type Config struct {
 }
 
 type Bot struct {
-	api     *tgbotapi.BotAPI
-	agent   agent.Agenter
-	store   store.Storager
-	cfg     Config
-	loc     *time.Location
-	send    func(chatID int64, text string)
-	botName string
-	log     zerolog.Logger
+	api       *tgbotapi.BotAPI
+	agent     agent.Agenter
+	store     store.Storager
+	cfg       Config
+	loc       *time.Location
+	send      func(chatID int64, text string)
+	botName   string
+	log       zerolog.Logger
+	mu        sync.Mutex
+	lastMsgAt time.Time
 }
 
 func New(token string, a agent.Agenter, s store.Storager, cfg Config) (*Bot, error) {
@@ -90,6 +94,16 @@ func (b *Bot) Run(ctx context.Context) {
 }
 
 func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
+	b.mu.Lock()
+	since := time.Since(b.lastMsgAt)
+	if since < minMsgInterval {
+		b.mu.Unlock()
+		b.log.Debug().Dur("since", since).Msg("rate limited message")
+		return
+	}
+	b.lastMsgAt = time.Now()
+	b.mu.Unlock()
+
 	text := msg.Text
 	chatID := msg.Chat.ID
 

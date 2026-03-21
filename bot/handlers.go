@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/gosub/nudgent/agent"
 	"github.com/gosub/nudgent/store"
 )
+
+const maxHistoryMessages = 20 // 10 turns
 
 func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	parts := strings.Fields(text)
@@ -66,9 +69,11 @@ func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 		tasks = nil
 	}
 
+	history := loadHistory(p.ConversationHistory)
+
 	prompt := agent.BuildChatPrompt(p.Language, p.Schedule, tasks, time.Now().In(b.loc))
 	b.log.Trace().Str("prompt", prompt).Msg("chat system prompt")
-	raw, err := b.agent.Chat(ctx, prompt, text)
+	raw, err := b.agent.Chat(ctx, prompt, history, text)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -88,12 +93,18 @@ func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 	}
 
 	b.log.Debug().Int("actions", len(resp.Actions)).Msg("executing actions")
-	if err := b.executeActions(ctx, resp.Actions); err != nil {
-		b.log.Error().Err(err).Msg("execute actions failed")
-	}
+	b.executeActions(ctx, resp.Actions)
 
 	if resp.Reply != "" {
 		b.send(chatID, resp.Reply)
+	}
+
+	// Persist conversation history
+	updated := appendHistory(history, text, resp.Reply)
+	if encoded, err := json.Marshal(updated); err == nil {
+		if err := b.store.SetConversationHistory(ctx, b.cfg.AllowedUserID, string(encoded)); err != nil {
+			b.log.Warn().Err(err).Msg("save conversation history failed")
+		}
 	}
 }
 
@@ -111,6 +122,7 @@ func (b *Bot) buildDebug(ctx context.Context) string {
 		sb.WriteString(fmt.Sprintf("nudge_interval_m: %d\n", p.NudgeIntervalM))
 		sb.WriteString(fmt.Sprintf("last_wakeup_at: %s\n", or(p.LastWakeupAt, "never")))
 		sb.WriteString(fmt.Sprintf("schedule: %s\n", or(p.Schedule, "not set")))
+		sb.WriteString(fmt.Sprintf("conversation_turns: %d\n", len(loadHistory(p.ConversationHistory))))
 	}
 
 	tasks, err := b.store.GetTasks(ctx, b.cfg.AllowedUserID)
@@ -134,7 +146,7 @@ func or(s, fallback string) string {
 	return s
 }
 
-func (b *Bot) executeActions(ctx context.Context, actions []agent.Action) error {
+func (b *Bot) executeActions(ctx context.Context, actions []agent.Action) {
 	for _, a := range actions {
 		b.log.Info().Str("type", string(a.Type)).Int64("id", a.ID).Str("desc", a.Description).Msg("action")
 		var err error
@@ -152,8 +164,6 @@ func (b *Bot) executeActions(ctx context.Context, actions []agent.Action) error 
 			if err == nil && a.NextNudgeAt != "" {
 				err = b.store.SetNextNudgeAt(ctx, a.ID, a.NextNudgeAt)
 			}
-		case agent.ActionSetNextNudge:
-			err = b.store.SetNextNudgeAt(ctx, a.ID, a.NextNudgeAt)
 		case agent.ActionCompleteTask:
 			err = b.store.CompleteTask(ctx, a.ID)
 		case agent.ActionDeleteTask:
@@ -165,5 +175,29 @@ func (b *Bot) executeActions(ctx context.Context, actions []agent.Action) error 
 			b.log.Error().Err(err).Str("action", string(a.Type)).Msg("action failed")
 		}
 	}
-	return nil
+}
+
+func loadHistory(raw string) []agent.Message {
+	if raw == "" {
+		return nil
+	}
+	var h []agent.Message
+	if err := json.Unmarshal([]byte(raw), &h); err != nil {
+		return nil
+	}
+	return h
+}
+
+func appendHistory(history []agent.Message, userMsg, assistantReply string) []agent.Message {
+	if userMsg != "" {
+		history = append(history, agent.Message{Role: "user", Content: userMsg})
+	}
+	if assistantReply != "" {
+		history = append(history, agent.Message{Role: "assistant", Content: assistantReply})
+	}
+	// Keep last maxHistoryMessages messages
+	if len(history) > maxHistoryMessages {
+		history = history[len(history)-maxHistoryMessages:]
+	}
+	return history
 }

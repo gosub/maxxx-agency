@@ -69,9 +69,10 @@ func BuildNudgePrompt(language, schedule string, tasks []*store.Task, now time.T
 
 	sb.WriteString("\nSend the user a short nudge. One task, one sentence, no fluff.\n")
 	sb.WriteString("If multiple tasks are due, pick the most urgent one.\n")
-	sb.WriteString("Use actions to update next_nudge_at for recurrent tasks after nudging.\n")
+	sb.WriteString("Use update_task to set next_nudge_at for recurring tasks after nudging.\n")
 	sb.WriteString("If no nudge is appropriate right now, return empty reply.\n\n")
 	sb.WriteString("Respond: {\"reply\": \"...\", \"actions\": [...]}\n")
+	sb.WriteString("Actions available: update_task (id, description optional, next_nudge_at optional), complete_task (id), delete_task (id).\n")
 
 	return sb.String()
 }

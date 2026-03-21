@@ -20,6 +20,12 @@ const (
 	apiRetryBackoffBase = 2
 )
 
+// Message is a single chat turn (user or assistant).
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 type Agent struct {
 	apiKey string
 	model  string
@@ -28,7 +34,7 @@ type Agent struct {
 }
 
 type Agenter interface {
-	Chat(ctx context.Context, systemPrompt string, userMessage string) (string, error)
+	Chat(ctx context.Context, systemPrompt string, history []Message, userMessage string) (string, error)
 }
 
 var _ Agenter = (*Agent)(nil)
@@ -42,18 +48,13 @@ func New(apiKey, model string) *Agent {
 	}
 }
 
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
 }
 
 type chatChoice struct {
-	Message chatMessage `json:"message"`
+	Message Message `json:"message"`
 }
 
 type chatResponse struct {
@@ -63,11 +64,12 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func (a *Agent) Chat(ctx context.Context, systemPrompt string, userMessage string) (string, error) {
-	messages := []chatMessage{
+func (a *Agent) Chat(ctx context.Context, systemPrompt string, history []Message, userMessage string) (string, error) {
+	messages := []Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userMessage},
 	}
+	messages = append(messages, history...)
+	messages = append(messages, Message{Role: "user", Content: userMessage})
 
 	body, err := json.Marshal(chatRequest{Model: a.model, Messages: messages})
 	if err != nil {

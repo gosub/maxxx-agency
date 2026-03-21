@@ -14,16 +14,17 @@ import (
 // --- mocks ---
 
 type mockStore struct {
-	prefs         *store.Prefs
-	tasks         []*store.Task
-	nextID        int64
-	ensurePrefsErr error
-	getTasksErr   error
-	addTaskErr    error
-	lastCompleted int64
-	lastDeleted   int64
-	lastSchedule  string
-	lastWakeupAt  string
+	prefs               *store.Prefs
+	tasks               []*store.Task
+	nextID              int64
+	ensurePrefsErr      error
+	getTasksErr         error
+	addTaskErr          error
+	lastCompleted       int64
+	lastDeleted         int64
+	lastSchedule        string
+	lastWakeupAt        string
+	conversationHistory string
 }
 
 func (m *mockStore) EnsurePrefs(ctx context.Context, userID int64, lang string, interval int) (*store.Prefs, error) {
@@ -53,6 +54,10 @@ func (m *mockStore) SetSchedule(ctx context.Context, userID int64, schedule stri
 }
 func (m *mockStore) SetLastWakeupAt(ctx context.Context, userID int64, t string) error {
 	m.lastWakeupAt = t
+	return nil
+}
+func (m *mockStore) SetConversationHistory(ctx context.Context, userID int64, history string) error {
+	m.conversationHistory = history
 	return nil
 }
 func (m *mockStore) AddTask(ctx context.Context, userID int64, description string) (*store.Task, error) {
@@ -113,7 +118,7 @@ type mockAgent struct {
 	calls    int
 }
 
-func (m *mockAgent) Chat(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+func (m *mockAgent) Chat(ctx context.Context, systemPrompt string, history []agent.Message, userMessage string) (string, error) {
 	m.calls++
 	return m.response, m.err
 }
@@ -252,7 +257,7 @@ func TestExecuteActions_AddTask(t *testing.T) {
 	actions := []agent.Action{
 		{Type: agent.ActionAddTask, Description: "Call dentist"},
 	}
-	_ = fb.executeActions(context.Background(), actions)
+	fb.executeActions(context.Background(), actions)
 	if len(ms.tasks) != 1 || ms.tasks[0].Description != "Call dentist" {
 		t.Errorf("task not added: %v", ms.tasks)
 	}
@@ -264,7 +269,7 @@ func TestExecuteActions_CompleteTask(t *testing.T) {
 		tasks: []*store.Task{{ID: 5, Description: "Gym"}},
 	}
 	fb := newFakeBot(ms, &mockAgent{})
-	_ = fb.executeActions(context.Background(), []agent.Action{{Type: agent.ActionCompleteTask, ID: 5}})
+	fb.executeActions(context.Background(), []agent.Action{{Type: agent.ActionCompleteTask, ID: 5}})
 	if ms.lastCompleted != 5 {
 		t.Errorf("lastCompleted = %d, want 5", ms.lastCompleted)
 	}
@@ -276,7 +281,7 @@ func TestExecuteActions_DeleteTask(t *testing.T) {
 		tasks: []*store.Task{{ID: 3, Description: "Old task"}},
 	}
 	fb := newFakeBot(ms, &mockAgent{})
-	_ = fb.executeActions(context.Background(), []agent.Action{{Type: agent.ActionDeleteTask, ID: 3}})
+	fb.executeActions(context.Background(), []agent.Action{{Type: agent.ActionDeleteTask, ID: 3}})
 	if ms.lastDeleted != 3 {
 		t.Errorf("lastDeleted = %d, want 3", ms.lastDeleted)
 	}
@@ -285,7 +290,7 @@ func TestExecuteActions_DeleteTask(t *testing.T) {
 func TestExecuteActions_UpdateSchedule(t *testing.T) {
 	ms := &mockStore{prefs: &store.Prefs{Language: "en"}}
 	fb := newFakeBot(ms, &mockAgent{})
-	_ = fb.executeActions(context.Background(), []agent.Action{
+	fb.executeActions(context.Background(), []agent.Action{
 		{Type: agent.ActionUpdateSchedule, Schedule: "weekdays 9-18"},
 	})
 	if ms.lastSchedule != "weekdays 9-18" {
@@ -299,8 +304,8 @@ func TestExecuteActions_SetNextNudge(t *testing.T) {
 		tasks: []*store.Task{{ID: 2, Description: "Report"}},
 	}
 	fb := newFakeBot(ms, &mockAgent{})
-	_ = fb.executeActions(context.Background(), []agent.Action{
-		{Type: agent.ActionSetNextNudge, ID: 2, NextNudgeAt: "2026-03-25T09:00:00"},
+	fb.executeActions(context.Background(), []agent.Action{
+		{Type: agent.ActionUpdateTask, ID: 2, NextNudgeAt: "2026-03-25T09:00:00"},
 	})
 	if ms.tasks[0].NextNudgeAt != "2026-03-25T09:00:00" {
 		t.Errorf("NextNudgeAt = %q", ms.tasks[0].NextNudgeAt)
@@ -313,6 +318,16 @@ func TestHandleChat_EnsurePrefsError(t *testing.T) {
 	fb.handleChat(context.Background(), 1, "hello")
 	if len(fb.messages) != 1 || !contains(fb.messages[0], "Something went wrong") {
 		t.Errorf("expected error message, got %v", fb.messages)
+	}
+}
+
+func TestHandleChat_HistorySaved(t *testing.T) {
+	ms := &mockStore{prefs: &store.Prefs{Language: "en"}}
+	ma := &mockAgent{response: `{"reply": "Done.", "actions": []}`}
+	fb := newFakeBot(ms, ma)
+	fb.handleChat(context.Background(), 1, "remind me about the meeting")
+	if ms.conversationHistory == "" {
+		t.Error("expected conversation history to be saved")
 	}
 }
 

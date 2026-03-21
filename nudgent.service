@@ -1,0 +1,14 @@
+[Unit]
+Description=Nudgent Telegram bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nudgent
+ExecStart=%h/nudgent/nudgent
+Restart=on-failure
+RestartSec=5s
+EnvironmentFile=%h/nudgent/.env
+
+[Install]
+WantedBy=default.target
