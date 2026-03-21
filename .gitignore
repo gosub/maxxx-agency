@@ -1,3 +1,5 @@
 .env
 nudgent
 nudgent.db
+nudgent.db-shm
+nudgent.db-wal
