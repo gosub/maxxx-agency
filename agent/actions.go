@@ -17,10 +17,11 @@ const (
 
 type Action struct {
 	Type        ActionType `json:"type"`
-	Description string     `json:"description,omitempty"` // add_task, update_task
-	ID          int64      `json:"id,omitempty"`          // update_task, complete_task, delete_task
+	Description string     `json:"description,omitempty"`   // add_task, update_task
+	ID          int64      `json:"id,omitempty"`            // update_task, complete_task, delete_task
 	NextNudgeAt string     `json:"next_nudge_at,omitempty"` // add_task, update_task
-	Schedule    string     `json:"schedule,omitempty"`    // update_schedule
+	Schedule    string     `json:"schedule,omitempty"`      // update_schedule
+	Recurring   bool       `json:"recurring,omitempty"`     // add_task, update_task
 }
 
 type Response struct {
