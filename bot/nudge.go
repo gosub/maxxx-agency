@@ -94,4 +94,5 @@ func (b *Bot) runNudgeCycle(ctx context.Context) {
 		l.Info().Int("due_tasks", len(due)).Msg("sending nudge")
 		b.send(b.cfg.AllowedUserID, resp.Reply)
 	}
+	l.Debug().Msg("nudge cycle done")
 }

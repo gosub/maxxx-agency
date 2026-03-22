@@ -99,6 +99,8 @@ func (b *Bot) handleChat(ctx context.Context, chatID int64, text string) {
 		b.send(chatID, resp.Reply)
 	}
 
+	b.log.Debug().Int("actions", len(resp.Actions)).Int("reply_len", len(resp.Reply)).Msg("chat done")
+
 	// Persist conversation history
 	updated := appendHistory(history, text, resp.Reply)
 	if encoded, err := json.Marshal(updated); err == nil {

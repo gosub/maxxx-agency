@@ -124,13 +124,16 @@ func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 
 func (b *Bot) sendMessage(chatID int64, text string) {
 	if b.api != nil {
+		b.log.Debug().Int64("chat_id", chatID).Int("text_len", len(text)).Msg("telegram send")
 		msg := tgbotapi.NewMessage(chatID, text)
 		msg.ParseMode = "Markdown"
 		if _, err := b.api.Send(msg); err != nil {
 			msg.ParseMode = ""
 			if _, err2 := b.api.Send(msg); err2 != nil {
-				b.log.Error().Err(err2).Int64("chat_id", chatID).Msg("send message failed")
+				b.log.Error().Err(err2).Int64("chat_id", chatID).Msg("telegram send failed")
+				return
 			}
 		}
+		b.log.Debug().Int64("chat_id", chatID).Msg("telegram sent")
 	}
 }

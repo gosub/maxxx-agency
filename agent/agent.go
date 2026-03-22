@@ -110,6 +110,7 @@ func (a *Agent) doRequest(ctx context.Context, body []byte) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 
+	a.log.Debug().Str("model", a.model).Int("body_bytes", len(body)).Msg("openrouter request")
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("send request: %w", err)
@@ -135,5 +136,7 @@ func (a *Agent) doRequest(ctx context.Context, body []byte) (string, error) {
 	if len(chatResp.Choices) == 0 {
 		return "", fmt.Errorf("no choices in response")
 	}
-	return chatResp.Choices[0].Message.Content, nil
+	content := chatResp.Choices[0].Message.Content
+	a.log.Debug().Int("response_bytes", len(content)).Msg("openrouter response")
+	return content, nil
 }
