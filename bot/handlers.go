@@ -20,10 +20,14 @@ func (b *Bot) handleCommand(ctx context.Context, chatID int64, text string) {
 	switch cmd {
 	case "/tasks":
 		b.send(chatID, b.buildTaskList(ctx))
+	case "/today":
+		b.send(chatID, b.buildPeriodSummary(ctx, "today"))
+	case "/week":
+		b.send(chatID, b.buildPeriodSummary(ctx, "week"))
 	case "/debug":
 		b.send(chatID, b.buildDebug(ctx))
 	case "/help":
-		b.send(chatID, "/tasks — list active tasks\n/help — show this message\n\nOr just tell me what you need.")
+		b.send(chatID, "/tasks — list active tasks\n/today — done and due tasks for today\n/week — done and due tasks for this week\n/help — show this message\n\nOr just tell me what you need.")
 	default:
 		// unknown commands are silently ignored
 	}
@@ -42,12 +46,79 @@ func (b *Bot) buildTaskList(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("Active tasks:\n")
 	for i, t := range tasks {
+		prefix := ""
+		if t.Recurring {
+			prefix = "↻ "
+		}
 		nudge := ""
 		if t.NextNudgeAt != "" {
 			nudge = " — " + t.NextNudgeAt
 		}
-		sb.WriteString(fmt.Sprintf("  %d. %s%s\n", i+1, t.Description, nudge))
+		sb.WriteString(fmt.Sprintf("  %d. %s%s%s\n", i+1, prefix, t.Description, nudge))
 	}
+	return sb.String()
+}
+
+func (b *Bot) buildPeriodSummary(ctx context.Context, period string) string {
+	now := time.Now().In(b.loc)
+	var from, to time.Time
+	var label string
+
+	switch period {
+	case "week":
+		weekday := int(now.Weekday())
+		if weekday == 0 {
+			weekday = 7 // Sunday = 7
+		}
+		from = time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, b.loc)
+		to = from.AddDate(0, 0, 6).Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+		label = fmt.Sprintf("Week of %s:", from.Format("2006-01-02"))
+	default: // "today"
+		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, b.loc)
+		to = from.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+		label = fmt.Sprintf("Today, %s:", now.Format("2006-01-02"))
+	}
+
+	fromStr := from.UTC().Format("2006-01-02T15:04:05")
+	toStr := to.UTC().Format("2006-01-02T15:04:05")
+
+	events, err := b.store.GetEventsForPeriod(ctx, b.cfg.AllowedUserID, "completed", fromStr, toStr)
+	if err != nil {
+		b.log.Error().Err(err).Msg("get events failed")
+	}
+
+	dueTasks, err := b.store.GetTasksForPeriod(ctx, b.cfg.AllowedUserID, fromStr, toStr)
+	if err != nil {
+		b.log.Error().Err(err).Msg("get tasks for period failed")
+	}
+
+	if len(events) == 0 && len(dueTasks) == 0 {
+		return fmt.Sprintf("%s\n\nNothing scheduled.", label)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(label + "\n")
+
+	if len(events) > 0 {
+		sb.WriteString("\nDone:\n")
+		for _, e := range events {
+			sb.WriteString(fmt.Sprintf("  ✓ %s\n", e.Description))
+		}
+	}
+
+	if len(dueTasks) > 0 {
+		sb.WriteString("\nDue:\n")
+		for _, t := range dueTasks {
+			timeStr := ""
+			if t.NextNudgeAt != "" {
+				if parsed, err := time.Parse("2006-01-02T15:04:05", t.NextNudgeAt); err == nil {
+					timeStr = " — " + parsed.In(b.loc).Format("15:04")
+				}
+			}
+			sb.WriteString(fmt.Sprintf("  • %s%s\n", t.Description, timeStr))
+		}
+	}
+
 	return sb.String()
 }
 
@@ -134,8 +205,12 @@ func (b *Bot) buildDebug(ctx context.Context) string {
 	}
 	sb.WriteString(fmt.Sprintf("\ntasks (%d active):\n", len(tasks)))
 	for _, t := range tasks {
-		sb.WriteString(fmt.Sprintf("  [%d] %s\n      next_nudge_at: %s\n",
-			t.ID, t.Description, or(t.NextNudgeAt, "not set")))
+		recurring := ""
+		if t.Recurring {
+			recurring = " [recurring]"
+		}
+		sb.WriteString(fmt.Sprintf("  [%d] %s%s\n      next_nudge_at: %s\n",
+			t.ID, t.Description, recurring, or(t.NextNudgeAt, "not set")))
 	}
 
 	return sb.String()
@@ -155,7 +230,7 @@ func (b *Bot) executeActions(ctx context.Context, actions []agent.Action) {
 		switch a.Type {
 		case agent.ActionAddTask:
 			var t *store.Task
-			t, err = b.store.AddTask(ctx, b.cfg.AllowedUserID, a.Description)
+			t, err = b.store.AddTask(ctx, b.cfg.AllowedUserID, a.Description, a.Recurring)
 			if err == nil && a.NextNudgeAt != "" {
 				err = b.store.SetNextNudgeAt(ctx, t.ID, a.NextNudgeAt)
 			}
@@ -166,7 +241,26 @@ func (b *Bot) executeActions(ctx context.Context, actions []agent.Action) {
 			if err == nil && a.NextNudgeAt != "" {
 				err = b.store.SetNextNudgeAt(ctx, a.ID, a.NextNudgeAt)
 			}
+			if err == nil && a.Recurring {
+				err = b.store.SetRecurring(ctx, a.ID, a.Recurring)
+			}
 		case agent.ActionCompleteTask:
+			tasks, terr := b.store.GetTasks(ctx, b.cfg.AllowedUserID)
+			if terr != nil {
+				b.log.Error().Err(terr).Msg("get tasks for complete check failed")
+				continue
+			}
+			var recurring bool
+			for _, t := range tasks {
+				if t.ID == a.ID {
+					recurring = t.Recurring
+					break
+				}
+			}
+			if recurring {
+				b.log.Warn().Int64("id", a.ID).Msg("skipping complete_task on recurring task")
+				continue
+			}
 			err = b.store.CompleteTask(ctx, a.ID)
 		case agent.ActionDeleteTask:
 			err = b.store.DeleteTask(ctx, a.ID)
